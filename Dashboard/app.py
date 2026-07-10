@@ -18,7 +18,7 @@ DB_DIR = Path(__file__).resolve().parent.parent / "Database"
 MARKETS = ["KC", "CC", "SB", "CT"]
 MARKET_NAMES = {"KC": "Arabica Coffee", "CC": "NY Cocoa", "SB": "Sugar #11", "CT": "Cotton"}
 LOT_MULTIPLIERS = {"KC": 375, "SB": 1120, "CT": 500, "CC": 10}
-VAR_WINDOW_PRESETS = [20, 60, 120, 240, 500]
+VAR_WINDOW_PRESETS = [60, 120]
 
 # dataviz reference palette — categorical slots (light mode)
 BLUE = "#2a78d6"
@@ -81,8 +81,15 @@ def compute_dynamic_model(prices_df, scanning_df, market, tier, window):
     ev = ev.dropna(subset=["eff_date", "initial_margin"])
     ev = ev[ev["initial_margin"] > 0].sort_values("eff_date")
 
+    # normalise both merge keys to the same datetime precision — st.cache_data's
+    # Arrow round-trip can leave `date` as datetime64[us] vs eff_date's [ns],
+    # and merge_asof requires an exact dtype match.
+    ev["eff_date"] = ev["eff_date"].astype("datetime64[ns]")
+    right = p[["date", "var_daily"]].dropna().copy()
+    right["date"] = right["date"].astype("datetime64[ns]")
+
     merged = pd.merge_asof(
-        ev, p[["date", "var_daily"]].dropna(),
+        ev, right,
         left_on="eff_date", right_on="date", direction="backward",
     ).dropna(subset=["var_daily"])
 
@@ -126,7 +133,7 @@ with st.sidebar:
 
     st.divider()
     var_window_choice = st.selectbox(
-        "VaR window (days)", VAR_WINDOW_PRESETS + ["Custom"], index=1,
+        "VaR window (days)", VAR_WINDOW_PRESETS + ["Custom"], index=0,
         help="Rolling window used to compute realised volatility for the model margin.",
     )
     if var_window_choice == "Custom":
