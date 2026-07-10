@@ -17,6 +17,8 @@ DB_DIR = Path(__file__).resolve().parent.parent / "Database"
 
 MARKETS = ["KC", "CC", "SB", "CT"]
 MARKET_NAMES = {"KC": "Arabica Coffee", "CC": "NY Cocoa", "SB": "Sugar #11", "CT": "Cotton"}
+LOT_MULTIPLIERS = {"KC": 375, "SB": 1120, "CT": 500, "CC": 10}
+VAR_WINDOW_PRESETS = [20, 60, 120, 240, 500]
 
 # dataviz reference palette — categorical slots (light mode)
 BLUE = "#2a78d6"
@@ -59,6 +61,40 @@ def load_data():
     return scanning, prices, margin_var
 
 
+def compute_dynamic_model(prices_df, scanning_df, market, tier, window):
+    """Fit initial_margin ~ var_daily(window) on margin-change events, using the
+    full available history for that market/tier — then apply the fit across
+    the whole price series. Returns (price_df_with_model_margin, intercept, slope)."""
+    multiplier = LOT_MULTIPLIERS.get(market)
+    if multiplier is None:
+        return None, None, None
+
+    p = prices_df[prices_df["market"] == market].sort_values("date").copy()
+    log_ret = np.log(p["gsci_close"] / p["gsci_close"].shift(1))
+    p["rv_win"] = log_ret.rolling(window).std() * np.sqrt(252) * 100
+    p["var_annual"] = p["flat_close"] * multiplier * p["rv_win"] / 100
+    p["var_daily"] = p["var_annual"] / np.sqrt(252)
+
+    ev = scanning_df[(scanning_df["market"] == market) & (scanning_df["tier"] == tier)].copy()
+    ev["eff_date"] = pd.to_datetime(ev["effective_date"], format="%d-%b-%y", errors="coerce")
+    ev["initial_margin"] = pd.to_numeric(ev["new_applied_margin_rate"], errors="coerce")
+    ev = ev.dropna(subset=["eff_date", "initial_margin"])
+    ev = ev[ev["initial_margin"] > 0].sort_values("eff_date")
+
+    merged = pd.merge_asof(
+        ev, p[["date", "var_daily"]].dropna(),
+        left_on="eff_date", right_on="date", direction="backward",
+    ).dropna(subset=["var_daily"])
+
+    if len(merged) < 3:
+        p["model_margin"] = np.nan
+        return p, None, None
+
+    slope, intercept = np.polyfit(merged["var_daily"], merged["initial_margin"], 1)
+    p["model_margin"] = intercept + slope * p["var_daily"]
+    return p, intercept, slope
+
+
 def base_layout(height=340):
     return dict(
         template="plotly_white",
@@ -88,6 +124,16 @@ with st.sidebar:
                      help="Tier 1 = spot/nearby months (higher margin). Tier 2 = further-out months.")
     lookback_years = st.slider("Lookback (years)", 1, 10, 10)
 
+    st.divider()
+    var_window_choice = st.selectbox(
+        "VaR window (days)", VAR_WINDOW_PRESETS + ["Custom"], index=1,
+        help="Rolling window used to compute realised volatility for the model margin.",
+    )
+    if var_window_choice == "Custom":
+        var_window = st.number_input("Custom window (days)", min_value=5, max_value=750, value=90, step=5)
+    else:
+        var_window = var_window_choice
+
     latest_date = margin_var["date"].max()
     st.divider()
     st.caption(f"Latest data: {latest_date.strftime('%d %b %Y')}")
@@ -96,7 +142,15 @@ contract = f"{market}{tier}"
 cutoff = latest_date - pd.DateOffset(years=lookback_years)
 
 mv = margin_var[(margin_var["contract"] == contract) & (margin_var["date"] >= cutoff)].copy()
-mv = mv.sort_values("date")
+mv = mv.drop(columns=["model_margin"]).sort_values("date")
+
+model_df, model_intercept, model_slope = compute_dynamic_model(
+    prices, scanning, market, tier, int(var_window)
+)
+if model_df is not None:
+    mv = mv.merge(model_df[["date", "model_margin"]], on="date", how="left")
+else:
+    mv["model_margin"] = np.nan
 
 if mv.empty:
     st.warning(f"No data for {contract} in the selected window.")
@@ -113,7 +167,7 @@ gap_color = RED if pd.notna(gap) and gap >= 0 else BLUE
 
 kpis = [
     ("Exchange IM (per lot)", f"${latest_row['initial_margin']:,.0f}", BLUE),
-    ("Model IM (per lot)", f"${model_val:,.0f}" if pd.notna(model_val) else "n/a", AQUA),
+    (f"Model IM ({var_window}d VaR)", f"${model_val:,.0f}" if pd.notna(model_val) else "n/a", AQUA),
     ("Gap (Exchange − Model)", f"${gap:,.0f}" if pd.notna(gap) else "n/a", gap_color),
     ("Flat price", f"{latest_row['flat_close']:,.2f}", MUTED),
 ]
@@ -140,7 +194,7 @@ fig1.add_trace(go.Scatter(
     line=dict(color=BLUE, width=2, shape="hv"),
 ))
 fig1.add_trace(go.Scatter(
-    x=mv["date"], y=mv["model_margin"], mode="lines", name="Model IM (avg rv60/rv120)",
+    x=mv["date"], y=mv["model_margin"], mode="lines", name=f"Model IM ({var_window}d VaR)",
     line=dict(color=AQUA, width=2, dash="dash"),
 ))
 fig1.update_layout(**base_layout())
