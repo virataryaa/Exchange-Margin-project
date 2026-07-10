@@ -103,7 +103,7 @@ def fetch_new_csvs(full: bool, since_years: int | None = None) -> int:
                         elif e.code == 429:
                             retries += 1
                             if retries > MAX_RATE_LIMIT_RETRIES:
-                                print(f"  rate limited on {date_str} after {retries} retries — giving up on this date.")
+                                print(f"  rate limited on {date_str} after {retries} retries - giving up on this date.")
                                 break
                             print(f"  rate limited, waiting 30s (retry {retries}/{MAX_RATE_LIMIT_RETRIES})...")
                             time.sleep(30)
@@ -171,7 +171,7 @@ def build_margin_scanning(con: duckdb.DuckDBPyConnection, since_years: int | Non
     print(f"Kept {len(all_rows)} rows (CC/KC/SB/CT/OJ, tiers 1-2).")
 
     if not all_rows:
-        raise SystemExit("No margin rows parsed — check raw_csv/ contents.")
+        raise SystemExit("No margin rows parsed - check raw_csv/ contents.")
 
     con.execute("DROP TABLE IF EXISTS margin_scanning")
     con.execute("""
@@ -265,7 +265,7 @@ def build_prices(con: duckdb.DuckDBPyConnection, full: bool, since_years: int | 
         flat.index = pd.to_datetime(flat.index)
 
         if gsci.empty:
-            print(f"    [{market}] no GSCI data — skipping")
+            print(f"    [{market}] no GSCI data - skipping")
             continue
 
         rv = compute_rv(gsci)
