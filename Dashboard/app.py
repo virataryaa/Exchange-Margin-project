@@ -107,13 +107,28 @@ latest_row = mv.iloc[-1]
 st.subheader(f"{market} — {MARKET_NAMES[market]}, Tier {tier}")
 
 # ── KPI row ──────────────────────────────────────────────────────────────────
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Exchange IM (per lot)", f"${latest_row['initial_margin']:,.0f}")
 model_val = latest_row["model_margin"]
-col2.metric("Model IM (per lot)", f"${model_val:,.0f}" if pd.notna(model_val) else "n/a")
 gap = latest_row["initial_margin"] - model_val if pd.notna(model_val) else np.nan
-col3.metric("Gap (Exchange − Model)", f"${gap:,.0f}" if pd.notna(gap) else "n/a")
-col4.metric("Flat price", f"{latest_row['flat_close']:,.2f}")
+gap_color = RED if pd.notna(gap) and gap >= 0 else BLUE
+
+kpis = [
+    ("Exchange IM (per lot)", f"${latest_row['initial_margin']:,.0f}", BLUE),
+    ("Model IM (per lot)", f"${model_val:,.0f}" if pd.notna(model_val) else "n/a", AQUA),
+    ("Gap (Exchange − Model)", f"${gap:,.0f}" if pd.notna(gap) else "n/a", gap_color),
+    ("Flat price", f"{latest_row['flat_close']:,.2f}", MUTED),
+]
+
+card_html = '<div style="display:flex;gap:12px;margin:.4rem 0 1rem">'
+for label, value, color in kpis:
+    card_html += f"""
+    <div style="flex:1;background:#fcfcfb;border:1px solid #e8e8e5;border-top:3px solid {color};
+                border-radius:8px;padding:12px 16px">
+      <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;
+                  color:#898781;margin-bottom:4px">{label}</div>
+      <div style="font-size:1.35rem;font-weight:600;color:#0b0b0b">{value}</div>
+    </div>"""
+card_html += "</div>"
+st.markdown(card_html, unsafe_allow_html=True)
 
 st.divider()
 
