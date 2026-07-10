@@ -361,14 +361,15 @@ def build_margin_var(con: duckdb.DuckDBPyConnection) -> None:
 # ---------------------------------------------------------------------------
 def build_model_margin(con: duckdb.DuckDBPyConnection) -> None:
     print("Fitting per-market model_margin...")
-    events = con.execute("""
+    model_markets_sql = ", ".join(f"'{m}'" for m in MODEL_MARKETS)
+    events = con.execute(f"""
         WITH clean AS (
             SELECT
                 STRPTIME(ms.effective_date, '%d-%b-%y')::DATE AS event_date,
                 ms.market, ms.tier,
                 ROUND(TRY_CAST(ms.new_applied_margin_rate AS DOUBLE)) AS initial_margin
             FROM margin_scanning ms
-            WHERE ms.market IN ('CC', 'KC', 'SB', 'CT')
+            WHERE ms.market IN ({model_markets_sql})
               AND ms.tier IN (1, 2)
               AND ms.new_applied_margin_rate IS NOT NULL
               AND ms.new_applied_margin_rate <> ''
