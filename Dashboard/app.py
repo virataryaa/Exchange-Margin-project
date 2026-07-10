@@ -81,23 +81,6 @@ except FileNotFoundError as e:
 st.title("Exchange Margin Dashboard")
 st.caption("ICE initial margin (scanning range) vs a VaR-implied model margin, per market.")
 
-with st.expander("What is this dashboard?"):
-    st.markdown("""
-ICE sets **initial margin** (the deposit required per lot) using its own internal
-scanning-range methodology, and changes it from time to time as volatility shifts.
-
-This dashboard builds an independent **model margin** — an estimate of what the margin
-"should" be, based on realised volatility (60-day and 120-day) of a GSCI sub-index
-for that market — and compares it to what the exchange actually charges.
-
-- **Exchange > Model** (red, in the gap chart) — ICE is charging more margin than the
-  model implies. Could mean ICE is being conservative, or the model is missing something.
-- **Model > Exchange** (blue) — ICE margin looks light relative to realised vol.
-
-This is not a prediction of the *next* margin change — it's a lens for spotting when
-current margin looks rich or cheap versus recent volatility.
-""")
-
 with st.sidebar:
     st.header("Filters")
     market = st.selectbox("Market", MARKETS, format_func=lambda m: f"{m} — {MARKET_NAMES[m]}")
@@ -149,13 +132,6 @@ fig1.update_layout(**base_layout())
 fig1.update_xaxes(showgrid=False, linecolor=GRID)
 fig1.update_yaxes(showgrid=True, gridcolor=GRID, title="USD per lot")
 st.plotly_chart(fig1, use_container_width=True, config=PLOTLY_CONFIG)
-with st.expander("What does this chart show?"):
-    st.markdown(
-        "The solid step line is the actual margin ICE charges per lot — it only moves "
-        "on the dates ICE publishes a change. The dashed line is the model's estimate, "
-        "which moves daily with volatility. Where the two diverge for a stretch of time "
-        "is where the gap chart below picks up."
-    )
 
 # ── Chart 2: Gap (Exchange - Model) ──────────────────────────────────────────
 st.markdown("**Margin gap over time**")
@@ -176,18 +152,16 @@ fig2.update_layout(**base_layout(height=260))
 fig2.update_xaxes(showgrid=False, linecolor=GRID)
 fig2.update_yaxes(showgrid=True, gridcolor=GRID, title="USD")
 st.plotly_chart(fig2, use_container_width=True, config=PLOTLY_CONFIG)
-with st.expander("What does this chart show?"):
-    st.markdown(
-        "Exchange IM minus Model IM, in dollars per lot. Red fill = exchange margin sits "
-        "above the model (conservative); blue fill = exchange margin sits below the model "
-        "(loose relative to recent volatility)."
-    )
 
 # ── Chart 3: Flat price with margin change markers ──────────────────────────
 st.markdown("**Price with margin-change events**")
 events = scanning.copy()
 events["eff_date"] = pd.to_datetime(events["effective_date"], format="%d-%b-%y", errors="coerce")
 events = events[(events["market"] == market) & (events["tier"] == tier) & (events["eff_date"] >= cutoff)]
+
+events["new_margin"] = pd.to_numeric(events["new_applied_margin_rate"], errors="coerce")
+events["previous_margin"] = pd.to_numeric(events["previous_applied_margin_rate"], errors="coerce")
+events["direction"] = np.where(events["new_margin"] >= events["previous_margin"], "Increase", "Decrease")
 
 fig3 = go.Figure()
 fig3.add_trace(go.Scatter(
@@ -196,29 +170,34 @@ fig3.add_trace(go.Scatter(
 ))
 if not events.empty:
     ev_y = mv.set_index("date")["flat_close"].reindex(events["eff_date"], method="nearest")
-    fig3.add_trace(go.Scatter(
-        x=events["eff_date"], y=ev_y.values, mode="markers", name="Margin change",
-        marker=dict(color=RED, size=7, symbol="line-ns-open", line=dict(width=2, color=RED)),
-    ))
+    events = events.assign(flat_at_event=ev_y.values)
+
+    up = events[events["direction"] == "Increase"]
+    down = events[events["direction"] == "Decrease"]
+    if not up.empty:
+        fig3.add_trace(go.Scatter(
+            x=up["eff_date"], y=up["flat_at_event"], mode="markers", name="Margin increase",
+            marker=dict(color=RED, size=8, symbol="triangle-up"),
+        ))
+    if not down.empty:
+        fig3.add_trace(go.Scatter(
+            x=down["eff_date"], y=down["flat_at_event"], mode="markers", name="Margin decrease",
+            marker=dict(color=BLUE, size=8, symbol="triangle-down"),
+        ))
 fig3.update_layout(**base_layout(height=260))
 fig3.update_xaxes(showgrid=False, linecolor=GRID)
 fig3.update_yaxes(showgrid=True, gridcolor=GRID, title="Price")
 st.plotly_chart(fig3, use_container_width=True, config=PLOTLY_CONFIG)
-with st.expander("What does this chart show?"):
-    st.markdown(
-        "The flat (outright) price for this market, with a red tick each time ICE changed "
-        "the margin for this tier. Useful for eyeballing whether margin changes tend to "
-        "follow price moves, or lag them."
-    )
 
 st.divider()
 
 # ── Table: recent margin-change events ──────────────────────────────────────
 st.markdown("**Recent margin-change events**")
 recent = events.sort_values("eff_date", ascending=False).head(20)[
-    ["eff_date", "new_applied_margin_rate", "previous_applied_margin_rate", "percentage_change"]
+    ["eff_date", "direction", "new_applied_margin_rate", "previous_applied_margin_rate", "percentage_change"]
 ].rename(columns={
     "eff_date": "Effective date",
+    "direction": "Direction",
     "new_applied_margin_rate": "New margin",
     "previous_applied_margin_rate": "Previous margin",
     "percentage_change": "% change",
