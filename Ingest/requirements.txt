@@ -1,0 +1,6 @@
+duckdb
+pandas
+numpy
+statsmodels
+lseg-data
+pyarrow

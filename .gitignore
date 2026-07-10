@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.env
+Automator/
+Ingest/raw_csv/
+Ingest/margin.duckdb
