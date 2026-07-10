@@ -42,16 +42,16 @@ TARGET_TIERS = {1, 2}
 MARKET_RICS = {
     "KC": (".SPGSKCP", "KCc2"),
     "CC": (".SPGSCCP", "CCc2"),
-    "CT": (".SPGSCTP", "CTv1"),
+    "CT": (".SPGSCTP", "CTc2"),
     "SB": (".SPGSSBP", "SBc1"),
     "OJ": (".SPGSOJP", "OJc2"),
 }
 
-LOT_MULTIPLIERS = {"KC": 375, "SB": 1120, "CT": 500, "CC": 10}
+LOT_MULTIPLIERS = {"KC": 375, "SB": 1120, "CT": 500, "CC": 10, "OJ": 150}
 RV_WINDOWS = [20, 60, 120, 240, 500]
 PRICE_START_FULL = "2015-01-01"
 SQRT252 = np.sqrt(252)
-MODEL_MARKETS = ["CC", "CT", "KC", "SB"]
+MODEL_MARKETS = ["CC", "CT", "KC", "SB", "OJ"]
 
 BASE_URL = "https://www.ice.com/publicdocs/clear_us/irmParameters/ICUS_MARGIN_SCANNING_{}.CSV"
 
@@ -81,30 +81,38 @@ def fetch_new_csvs(full: bool, since_years: int | None = None) -> int:
     print(f"Fetching margin CSVs {start} -> {end} ...")
     fetched = 0
     d = start
+    MAX_RATE_LIMIT_RETRIES = 5
     while d <= end:
         if d.weekday() < 5:
             date_str = d.strftime("%Y%m%d")
             out = RAW_DIR / f"ICUS_MARGIN_SCANNING_{date_str}.CSV"
             if not out.exists():
                 url = BASE_URL.format(date_str)
-                try:
-                    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                    with urllib.request.urlopen(req, timeout=30) as r, open(out, "wb") as f:
-                        f.write(r.read())
-                    print(f"  saved {date_str}")
-                    fetched += 1
-                    time.sleep(1)
-                except urllib.error.HTTPError as e:
-                    if e.code == 404:
-                        pass
-                    elif e.code == 429:
-                        print("  rate limited, waiting 30s...")
-                        time.sleep(30)
-                        continue
-                    else:
+                retries = 0
+                while True:
+                    try:
+                        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                        with urllib.request.urlopen(req, timeout=30) as r, open(out, "wb") as f:
+                            f.write(r.read())
+                        print(f"  saved {date_str}")
+                        fetched += 1
+                        time.sleep(1)
+                    except urllib.error.HTTPError as e:
+                        if e.code == 404:
+                            pass
+                        elif e.code == 429:
+                            retries += 1
+                            if retries > MAX_RATE_LIMIT_RETRIES:
+                                print(f"  rate limited on {date_str} after {retries} retries — giving up on this date.")
+                                break
+                            print(f"  rate limited, waiting 30s (retry {retries}/{MAX_RATE_LIMIT_RETRIES})...")
+                            time.sleep(30)
+                            continue
+                        else:
+                            print(f"  error {date_str}: {e}")
+                    except Exception as e:
                         print(f"  error {date_str}: {e}")
-                except Exception as e:
-                    print(f"  error {date_str}: {e}")
+                    break
         d += timedelta(days=1)
     print(f"Fetch done: {fetched} new files.")
     return fetched

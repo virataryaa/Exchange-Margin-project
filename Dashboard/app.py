@@ -15,9 +15,9 @@ import streamlit as st
 
 DB_DIR = Path(__file__).resolve().parent.parent / "Database"
 
-MARKETS = ["KC", "CC", "SB", "CT"]
-MARKET_NAMES = {"KC": "Arabica Coffee", "CC": "NY Cocoa", "SB": "Sugar #11", "CT": "Cotton"}
-LOT_MULTIPLIERS = {"KC": 375, "SB": 1120, "CT": 500, "CC": 10}
+MARKETS = ["KC", "CC", "SB", "CT", "OJ"]
+MARKET_NAMES = {"KC": "Arabica Coffee", "CC": "NY Cocoa", "SB": "Sugar #11", "CT": "Cotton", "OJ": "Orange Juice"}
+LOT_MULTIPLIERS = {"KC": 375, "SB": 1120, "CT": 500, "CC": 10, "OJ": 150}
 VAR_WINDOW_PRESETS = [60, 120]
 
 # dataviz reference palette — categorical slots (light mode)
